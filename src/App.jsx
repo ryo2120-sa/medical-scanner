@@ -19,11 +19,17 @@ const App = () => {
       
       for (const label of labelArray) {
         try {
-          const regex = new RegExp(`${label}\\s*[:;]?\\s*(.*)`, 'i');
+          // FIX: We use [ \t] instead of \s. 
+          // \s includes newlines, which caused the bug of grabbing the next line.
+          // [ \t] only matches spaces and tabs on the SAME line.
+          const regex = new RegExp(`${label}[ \\t]*[:;]?[ \\t]*(.*)`, 'i');
           const match = text.match(regex);
-          // If match found and it's not empty, return it
-          if (match && match[1].trim()) {
-            return match[1].trim();
+          
+          if (match && match[1]) {
+            const val = match[1].trim();
+            // Extra safety: If the value we grabbed looks like another label (ends in colon), ignore it
+            if (val.includes(':') && val.length < 20) return '';
+            return val;
           }
         } catch (e) { continue; }
       }
@@ -65,13 +71,11 @@ const App = () => {
     };
 
     // Construct Data Object
-    // checks multiple variations of labels now
     const data = {
       name: findValue('Patient Name'),
       address: findValue('Address'),
       cityStateZip: findValue('City, State, Zip'),
       
-      // Phone logic: Checks "Home Phone Number", then "Home Phone", etc.
       homePhone: findValue(['Home Phone Number', 'Home Phone']),
       daytimePhone: findValue(['Daytime Phone Number', 'Daytime Phone', 'Work Phone', 'Cell Phone']),
       
@@ -102,7 +106,7 @@ const App = () => {
     let currentY = marginTop;
 
     const printLine = (label, value) => {
-      // CRITICAL: If value is empty, do nothing. This collapses the whitespace.
+      // If value is empty, do nothing. This collapses the whitespace.
       if (!value) return; 
       
       doc.setFont("helvetica", "bold");
@@ -117,7 +121,6 @@ const App = () => {
     printLine("Address", parsedData.address);
     printLine("City, State, Zip", parsedData.cityStateZip);
     
-    // These will automatically be skipped if empty
     printLine("Home Phone", parsedData.homePhone);
     printLine("Daytime Phone", parsedData.daytimePhone);
     
@@ -127,7 +130,6 @@ const App = () => {
     
     // --- Emergency ---
     if (parsedData.emergencyContact || parsedData.emergencyPhone) {
-        // Add a tiny gap before emergency section if it exists
         if(parsedData.emergencyContact) currentY += lineHeight * 0.2; 
         printLine("Emerg. Contact", parsedData.emergencyContact);
         printLine("Emerg. Phone", parsedData.emergencyPhone);
@@ -135,7 +137,7 @@ const App = () => {
     
     // --- Multiple Insurances ---
     parsedData.insurances.forEach((ins, index) => {
-      currentY += lineHeight / 2; // Spacer
+      currentY += lineHeight / 2;
       doc.setFont("helvetica", "bolditalic");
       doc.text(`--- ${ins.type || 'Insurance'} (${index + 1}) ---`, marginLeft, currentY);
       currentY += lineHeight;
@@ -162,7 +164,7 @@ const App = () => {
             </div>
             <textarea 
               className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder={`Paste raw text here.\n\nExample:\nP MEDICARE JOHN DOE 12345ABC 800-555-1111\nS AETNA JANE DOE 98765XYZ 800-555-2222`}
+              placeholder={`Paste raw text here...`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
             />
@@ -205,7 +207,6 @@ const App = () => {
                     <PreviewRow label="Address" value={parsedData.address} />
                     <PreviewRow label="City, State" value={parsedData.cityStateZip} />
                     
-                    {/* These rows will automatically hide if data is empty */}
                     <PreviewRow label="Home Phone" value={parsedData.homePhone} />
                     <PreviewRow label="Day Phone" value={parsedData.daytimePhone} />
                     
