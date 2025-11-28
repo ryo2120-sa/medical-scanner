@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { jsPDF } from 'jspdf';
-import { FileText, Download, Eraser, Clipboard, Type, Minus, Plus, X } from 'lucide-react';
+import { FileText, Download, Eraser, Clipboard, Type, Minus, Plus, X, RotateCw } from 'lucide-react';
 
 const App = () => {
   const [inputText, setInputText] = useState('');
@@ -11,17 +11,21 @@ const App = () => {
   const [images, setImages] = useState([]);
   const [selectedImageId, setSelectedImageId] = useState(null);
   
-  // Refs for drag/resize calculations
+  // Refs for drag/resize/rotate calculations
   const paperRef = useRef(null);
   const dragInfo = useRef({ 
     isDragging: false, 
     isResizing: false, 
+    isRotating: false,
     startX: 0, 
     startY: 0, 
     initialX: 0, 
     initialY: 0, 
     initialW: 0, 
     initialH: 0, 
+    initialRotation: 0,
+    centerX: 0,
+    centerY: 0,
     targetId: null 
   });
 
@@ -32,10 +36,8 @@ const App = () => {
   // --- PASTE LISTENER ---
   useEffect(() => {
     const handlePaste = (e) => {
-      // Allow pasting text into input fields normally
       if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
-        // If clipboard HAS items that are images, we want to catch them even if in textarea
-        // But usually browser handles text. Let's check for files specifically.
+         // allow default behavior
       }
 
       const items = e.clipboardData.items;
@@ -44,7 +46,7 @@ const App = () => {
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image') !== -1) {
           blob = items[i].getAsFile();
-          break; // Take the first image found
+          break; 
         }
       }
 
@@ -60,11 +62,10 @@ const App = () => {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [images]); // Depend on images so we can calculate offset
+  }, [images]); 
 
   const addNewImage = (src) => {
-    // Stagger position so they don't stack perfectly on top of each other
-    const offset = (images.length % 10) * 15; // 15px shift for each new image
+    const offset = (images.length % 10) * 15; 
     
     const newImage = {
       id: Date.now(),
@@ -72,7 +73,8 @@ const App = () => {
       x: 20 + offset, 
       y: 100 + offset,
       width: 150, 
-      height: 100, 
+      height: 100,
+      rotation: 0 // New Rotation State
     };
     
     setImages(prev => [...prev, newImage]);
@@ -84,37 +86,46 @@ const App = () => {
     if (selectedImageId === id) setSelectedImageId(null);
   };
 
-  // --- MOUSE HANDLERS (MOVE / RESIZE / BRING TO FRONT) ---
+  // --- MOUSE HANDLERS (MOVE / RESIZE / ROTATE) ---
   const handleMouseDown = (e, id, type) => {
     e.preventDefault();
-    e.stopPropagation(); // Stop event bubbling
+    e.stopPropagation(); 
     
-    // 1. Select the image
     setSelectedImageId(id);
 
-    // 2. Bring to Front Logic:
-    // We remove the image from its current spot in array and push to the end.
-    // The last item in DOM/Array renders on top.
+    // Bring to front
     setImages(prev => {
       const imgToMove = prev.find(img => img.id === id);
       const others = prev.filter(img => img.id !== id);
       return [...others, imgToMove];
     });
     
-    // Get the current image object (from current state reference)
     const img = images.find(i => i.id === id);
     if (!img) return;
 
-    // 3. Setup Drag info
+    // Calculate center for rotation
+    // Note: We need screen coordinates for the image center
+    // We can approximate or use the event target's bounding rect if available
+    let cx = 0, cy = 0;
+    if (type === 'rotate') {
+        const rect = e.target.closest('.image-container').getBoundingClientRect();
+        cx = rect.left + rect.width / 2;
+        cy = rect.top + rect.height / 2;
+    }
+
     dragInfo.current = {
       isDragging: type === 'move',
       isResizing: type === 'resize',
+      isRotating: type === 'rotate',
       startX: e.clientX,
       startY: e.clientY,
       initialX: img.x,
       initialY: img.y,
       initialW: img.width,
       initialH: img.height,
+      initialRotation: img.rotation,
+      centerX: cx,
+      centerY: cy,
       targetId: id
     };
 
@@ -124,31 +135,44 @@ const App = () => {
 
   const handleMouseMove = (e) => {
     const info = dragInfo.current;
-    if (!info.isDragging && !info.isResizing) return;
-
-    const dx = e.clientX - info.startX;
-    const dy = e.clientY - info.startY;
+    if (!info.isDragging && !info.isResizing && !info.isRotating) return;
 
     setImages(prev => prev.map(img => {
       if (img.id !== info.targetId) return img;
 
       if (info.isDragging) {
+        const dx = e.clientX - info.startX;
+        const dy = e.clientY - info.startY;
         return { ...img, x: info.initialX + dx, y: info.initialY + dy };
       }
+      
       if (info.isResizing) {
-        // Minimum size 20x20
+        const dx = e.clientX - info.startX;
+        const dy = e.clientY - info.startY;
+        // Simple resize logic (bottom-right corner)
+        // Rotating resize is complex, so we stick to simple width/height adjustment relative to unrotated axis for simplicity
+        // or just accept visual weirdness if resizing while rotated.
         return { 
           ...img, 
           width: Math.max(20, info.initialW + dx), 
           height: Math.max(20, info.initialH + dy) 
         };
       }
+
+      if (info.isRotating) {
+        // Calculate angle between center and mouse
+        const radians = Math.atan2(e.clientY - info.centerY, e.clientX - info.centerX);
+        const degrees = radians * (180 / Math.PI);
+        // Offset by 90 degrees because the handle is at the top (which is -90 degrees in trig)
+        return { ...img, rotation: degrees + 90 };
+      }
+
       return img;
     }));
   };
 
   const handleMouseUp = () => {
-    dragInfo.current = { isDragging: false, isResizing: false, targetId: null };
+    dragInfo.current = { isDragging: false, isResizing: false, isRotating: false, targetId: null };
     window.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('mouseup', handleMouseUp);
   };
@@ -185,8 +209,56 @@ const App = () => {
     });
   };
 
+  // --- HELPER: BAKE ROTATION FOR PDF ---
+  // Returns a promise resolving to { src, x, y, width, height } adjusted for PDF
+  const bakeRotation = (img) => {
+    return new Promise((resolve) => {
+        if (!img.rotation || img.rotation === 0) {
+            resolve({ src: img.src, x: img.x, y: img.y, w: img.width, h: img.height });
+            return;
+        }
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const imageElem = new Image();
+        imageElem.src = img.src;
+        
+        imageElem.onload = () => {
+            const rads = img.rotation * (Math.PI / 180);
+            const sin = Math.abs(Math.sin(rads));
+            const cos = Math.abs(Math.cos(rads));
+
+            // Calculate new bounding box size
+            const newWidth = img.width * cos + img.height * sin;
+            const newHeight = img.width * sin + img.height * cos;
+
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+
+            // Move to center, rotate, move back (standard canvas rotation)
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(rads);
+            ctx.drawImage(imageElem, -img.width / 2, -img.height / 2, img.width, img.height);
+
+            // Calculate new Top-Left position based on center alignment
+            const cx = img.x + img.width / 2;
+            const cy = img.y + img.height / 2;
+            const newX = cx - newWidth / 2;
+            const newY = cy - newHeight / 2;
+
+            resolve({
+                src: canvas.toDataURL(),
+                x: newX,
+                y: newY,
+                w: newWidth,
+                h: newHeight
+            });
+        };
+    });
+  };
+
   // --- PDF GENERATION ---
-  const generatePDF = () => {
+  const generatePDF = async () => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
     const marginLeft = 15;
     const marginTop = 15;
@@ -220,23 +292,22 @@ const App = () => {
     }
 
     // 2. Print Images
-    // Convert 400px screen preview width to 215.9mm PDF width
     const paperWidthPx = 400; 
     const paperWidthMm = 215.9;
     const scaleFactor = paperWidthMm / paperWidthPx;
 
-    // Because we reorder the array on click, images are already sorted "bottom to top"
-    // So printing them in order preserves the Z-index.
-    images.forEach(img => {
-      doc.addImage(
-        img.src, 
-        'PNG', 
-        img.x * scaleFactor, 
-        img.y * scaleFactor, 
-        img.width * scaleFactor, 
-        img.height * scaleFactor
-      );
-    });
+    // Process all images (awaiting rotation baking if needed)
+    for (const img of images) {
+        const baked = await bakeRotation(img);
+        doc.addImage(
+            baked.src, 
+            'PNG', 
+            baked.x * scaleFactor, 
+            baked.y * scaleFactor, 
+            baked.w * scaleFactor, 
+            baked.h * scaleFactor
+        );
+    }
     
     doc.save(`${parsedData.name || 'document'}_with_images.pdf`);
   };
@@ -320,19 +391,21 @@ const App = () => {
                   </div>
                 </div>
 
-                {/* Images Layer (Z-index based on array order) */}
+                {/* Images Layer */}
                 {images.map((img, index) => (
                   <div
                     key={img.id}
+                    className="image-container"
                     style={{
                       position: 'absolute',
                       left: img.x,
                       top: img.y,
                       width: img.width,
                       height: img.height,
+                      transform: `rotate(${img.rotation || 0}deg)`, // Apply rotation
                       border: selectedImageId === img.id ? '2px solid #3b82f6' : '1px solid transparent',
                       cursor: 'move',
-                      zIndex: 10 + index // Visual stacking based on order
+                      zIndex: 10 + index 
                     }}
                     onMouseDown={(e) => handleMouseDown(e, img.id, 'move')}
                   >
@@ -345,14 +418,25 @@ const App = () => {
                     {/* Controls (Only show when selected) */}
                     {selectedImageId === img.id && (
                       <>
+                        {/* Rotate Handle */}
+                        <div 
+                           className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-white text-blue-600 rounded-full p-1 shadow border cursor-pointer hover:bg-blue-50 z-50"
+                           onMouseDown={(e) => handleMouseDown(e, img.id, 'rotate')}
+                           title="Rotate"
+                        >
+                            <RotateCw size={14} />
+                        </div>
+
+                        {/* Delete Button */}
                         <button 
                           onClick={(e) => { e.stopPropagation(); removeImage(img.id); }}
                           className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1 shadow hover:bg-red-600 z-50"
-                          title="Delete Image"
+                          title="Delete"
                         >
                           <X size={12} />
                         </button>
 
+                        {/* Resize Handle */}
                         <div 
                           className="absolute bottom-0 right-0 w-4 h-4 bg-blue-500 cursor-nwse-resize rounded-tl z-50"
                           onMouseDown={(e) => handleMouseDown(e, img.id, 'resize')}
