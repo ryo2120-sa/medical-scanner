@@ -14,8 +14,8 @@ const App = () => {
 
   const parseData = (text) => {
     const findValue = (label) => {
-      // Look for Label followed by colon or space, taking the rest of the line
       try {
+        // Look for Label followed by colon or space, taking the rest of the line
         const regex = new RegExp(`${label}\\s*[:;]?\\s*(.*)`, 'i');
         const match = text.match(regex);
         return match ? match[1].trim() : '';
@@ -29,7 +29,8 @@ const App = () => {
       name: findValue('Patient Name'),
       address: findValue('Address'),
       cityStateZip: findValue('City, State, Zip'),
-      phone: findValue('Home Phone Number') || findValue('Daytime Phone Number'),
+      homePhone: findValue('Home Phone Number'),       // Separated
+      daytimePhone: findValue('Daytime Phone Number'), // Separated
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
@@ -59,12 +60,14 @@ const App = () => {
     let currentY = marginTop;
 
     const printLine = (label, value) => {
+      // Skip empty fields, but always show insurance header if insurance exists
       if (!value && !label.includes("Insurance")) return;
       
       doc.setFont("helvetica", "bold");
       doc.text(`${label}:`, marginLeft, currentY);
       
       doc.setFont("helvetica", "normal");
+      // Offset value by 50mm to align columns
       doc.text(value || "", marginLeft + 50, currentY);
       
       currentY += lineHeight;
@@ -74,7 +77,8 @@ const App = () => {
     printLine("Patient Name", parsedData.name);
     printLine("Address", parsedData.address);
     printLine("City, State, Zip", parsedData.cityStateZip);
-    printLine("Phone", parsedData.phone);
+    printLine("Home Phone", parsedData.homePhone);       // Added
+    printLine("Daytime Phone", parsedData.daytimePhone); // Added
     printLine("Date of Birth", parsedData.dob);
     printLine("Age", parsedData.age);
     printLine("Sex", parsedData.sex);
@@ -110,7 +114,7 @@ const App = () => {
             </div>
             <textarea 
               className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder={`Paste here...\n\nPatient Name: John Doe\nAddress: 123 Main St...`}
+              placeholder={`Paste here...\n\nPatient Name: John Doe\nHome Phone Number: 555-0199...`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
             />
@@ -127,14 +131,15 @@ const App = () => {
             </div>
             
             <div className="flex items-center gap-4">
-              <button onClick={() => setFontSize(f => Math.max(8, f - 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
+              {/* Decrease Button (Min 4) */}
+              <button onClick={() => setFontSize(f => Math.max(4, f - 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
                 <Minus size={16}/>
               </button>
               
               <div className="flex-1">
                 <input 
                   type="range" 
-                  min="8" 
+                  min="4"  // Changed from 8 to 4
                   max="24" 
                   value={fontSize} 
                   onChange={(e) => setFontSize(Number(e.target.value))}
@@ -145,6 +150,7 @@ const App = () => {
                 </div>
               </div>
 
+              {/* Increase Button */}
               <button onClick={() => setFontSize(f => Math.min(30, f + 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
                 <Plus size={16}/>
               </button>
@@ -178,7 +184,8 @@ const App = () => {
                     <PreviewRow label="Patient Name" value={parsedData.name} />
                     <PreviewRow label="Address" value={parsedData.address} />
                     <PreviewRow label="City, State" value={parsedData.cityStateZip} />
-                    <PreviewRow label="Phone" value={parsedData.phone} />
+                    <PreviewRow label="Home Phone" value={parsedData.homePhone} />
+                    <PreviewRow label="Day Phone" value={parsedData.daytimePhone} />
                     <PreviewRow label="DOB" value={parsedData.dob} />
                     <PreviewRow label="Age" value={parsedData.age} />
                     <PreviewRow label="Sex" value={parsedData.sex} />
