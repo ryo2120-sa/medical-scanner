@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import { FileText, Download, Eraser, Clipboard, Type, Minus, Plus, X, RotateCw } from 'lucide-react';
 
+// Standard US Letter size at 96 DPI (Screen Resolution)
+const PDF_WIDTH_PX = 816; 
+const PDF_HEIGHT_PX = 1056; 
+// How much to shrink the preview to fit in the UI column
+const VIEW_SCALE = 0.55; 
+
 const App = () => {
   const [inputText, setInputText] = useState('');
   const [parsedData, setParsedData] = useState({});
@@ -12,7 +18,6 @@ const App = () => {
   const [selectedImageId, setSelectedImageId] = useState(null);
   
   // Refs for drag/resize/rotate calculations
-  const paperRef = useRef(null);
   const dragInfo = useRef({ 
     isDragging: false, 
     isResizing: false, 
@@ -65,16 +70,16 @@ const App = () => {
   }, [images]); 
 
   const addNewImage = (src) => {
-    const offset = (images.length % 10) * 15; 
+    const offset = (images.length % 10) * 30; // Larger offset for high res
     
     const newImage = {
       id: Date.now(),
       src: src,
-      x: 20 + offset, 
-      y: 100 + offset,
-      width: 150, 
-      height: 100,
-      rotation: 0 // New Rotation State
+      x: 50 + offset, 
+      y: 200 + offset,
+      width: 300,  // Larger default size
+      height: 200,
+      rotation: 0 
     };
     
     setImages(prev => [...prev, newImage]);
@@ -86,7 +91,7 @@ const App = () => {
     if (selectedImageId === id) setSelectedImageId(null);
   };
 
-  // --- MOUSE HANDLERS (MOVE / RESIZE / ROTATE) ---
+  // --- MOUSE HANDLERS ---
   const handleMouseDown = (e, id, type) => {
     e.preventDefault();
     e.stopPropagation(); 
@@ -103,9 +108,7 @@ const App = () => {
     const img = images.find(i => i.id === id);
     if (!img) return;
 
-    // Calculate center for rotation
-    // Note: We need screen coordinates for the image center
-    // We can approximate or use the event target's bounding rect if available
+    // Calculate center for rotation logic
     let cx = 0, cy = 0;
     if (type === 'rotate') {
         const rect = e.target.closest('.image-container').getBoundingClientRect();
@@ -140,30 +143,27 @@ const App = () => {
     setImages(prev => prev.map(img => {
       if (img.id !== info.targetId) return img;
 
+      // IMPORTANT: We divide delta by VIEW_SCALE to match the scaled coordinate system
+      const dx = (e.clientX - info.startX) / VIEW_SCALE;
+      const dy = (e.clientY - info.startY) / VIEW_SCALE;
+
       if (info.isDragging) {
-        const dx = e.clientX - info.startX;
-        const dy = e.clientY - info.startY;
         return { ...img, x: info.initialX + dx, y: info.initialY + dy };
       }
       
       if (info.isResizing) {
-        const dx = e.clientX - info.startX;
-        const dy = e.clientY - info.startY;
-        // Simple resize logic (bottom-right corner)
-        // Rotating resize is complex, so we stick to simple width/height adjustment relative to unrotated axis for simplicity
-        // or just accept visual weirdness if resizing while rotated.
         return { 
           ...img, 
-          width: Math.max(20, info.initialW + dx), 
-          height: Math.max(20, info.initialH + dy) 
+          width: Math.max(50, info.initialW + dx), 
+          height: Math.max(50, info.initialH + dy) 
         };
       }
 
       if (info.isRotating) {
-        // Calculate angle between center and mouse
+        // Rotation works in screen space, so we don't scale dx/dy
+        // We use the raw mouse position relative to the element center calculated in MouseDown
         const radians = Math.atan2(e.clientY - info.centerY, e.clientX - info.centerX);
         const degrees = radians * (180 / Math.PI);
-        // Offset by 90 degrees because the handle is at the top (which is -90 degrees in trig)
         return { ...img, rotation: degrees + 90 };
       }
 
@@ -209,8 +209,7 @@ const App = () => {
     });
   };
 
-  // --- HELPER: BAKE ROTATION FOR PDF ---
-  // Returns a promise resolving to { src, x, y, width, height } adjusted for PDF
+  // --- HELPER: BAKE ROTATION ---
   const bakeRotation = (img) => {
     return new Promise((resolve) => {
         if (!img.rotation || img.rotation === 0) {
@@ -228,19 +227,16 @@ const App = () => {
             const sin = Math.abs(Math.sin(rads));
             const cos = Math.abs(Math.cos(rads));
 
-            // Calculate new bounding box size
             const newWidth = img.width * cos + img.height * sin;
             const newHeight = img.width * sin + img.height * cos;
 
             canvas.width = newWidth;
             canvas.height = newHeight;
 
-            // Move to center, rotate, move back (standard canvas rotation)
             ctx.translate(canvas.width / 2, canvas.height / 2);
             ctx.rotate(rads);
             ctx.drawImage(imageElem, -img.width / 2, -img.height / 2, img.width, img.height);
 
-            // Calculate new Top-Left position based on center alignment
             const cx = img.x + img.width / 2;
             const cy = img.y + img.height / 2;
             const newX = cx - newWidth / 2;
@@ -260,8 +256,14 @@ const App = () => {
   // --- PDF GENERATION ---
   const generatePDF = async () => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
-    const marginLeft = 15;
-    const marginTop = 15;
+    
+    // Scale Factor: 215.9mm (PDF width) / 816px (Preview width)
+    const pxToMm = 215.9 / PDF_WIDTH_PX;
+    
+    const marginLeft = 15; // mm
+    const marginTop = 15; // mm
+    
+    // Convert pt to mm for line height logic
     const lineHeight = (fontSize * 0.3527) * 1.5; 
 
     doc.setFontSize(fontSize);
@@ -292,20 +294,15 @@ const App = () => {
     }
 
     // 2. Print Images
-    const paperWidthPx = 400; 
-    const paperWidthMm = 215.9;
-    const scaleFactor = paperWidthMm / paperWidthPx;
-
-    // Process all images (awaiting rotation baking if needed)
     for (const img of images) {
         const baked = await bakeRotation(img);
         doc.addImage(
             baked.src, 
             'PNG', 
-            baked.x * scaleFactor, 
-            baked.y * scaleFactor, 
-            baked.w * scaleFactor, 
-            baked.h * scaleFactor
+            baked.x * pxToMm, 
+            baked.y * pxToMm, 
+            baked.w * pxToMm, 
+            baked.h * pxToMm
         );
     }
     
@@ -314,7 +311,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 font-sans text-gray-800" onMouseDown={() => setSelectedImageId(null)}>
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
+      <div className="max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
         
         {/* LEFT COLUMN */}
         <div className="flex flex-col gap-4">
@@ -353,8 +350,8 @@ const App = () => {
 
         {/* RIGHT COLUMN */}
         <div className="flex flex-col h-full">
-          <div className="bg-white rounded-xl shadow-md p-6 flex-1 mb-6 flex flex-col">
-             <div className="flex items-center justify-between mb-4 border-b pb-4">
+          <div className="bg-white rounded-xl shadow-md p-6 flex-1 mb-6 flex flex-col items-center">
+             <div className="w-full flex items-center justify-between mb-4 border-b pb-4">
               <div className="flex items-center gap-2">
                 <FileText className="text-green-600" />
                 <h2 className="text-xl font-bold">3. Preview</h2>
@@ -362,103 +359,114 @@ const App = () => {
               {images.length > 0 && <span className="text-xs text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded">{images.length} Image{images.length !== 1 ? 's' : ''}</span>}
             </div>
 
-            <div className="flex-1 bg-gray-200 rounded border border-gray-300 p-4 overflow-auto flex justify-center items-start">
-              <div 
-                ref={paperRef}
-                className="bg-white shadow-2xl relative transition-all duration-200 ease-in-out overflow-hidden" 
-                style={{ width: '400px', height: '517px' }}
-                onMouseDown={(e) => e.stopPropagation()} 
-              >
-                
-                {/* Text Layer (Bottom) */}
-                <div className="absolute top-0 left-0 right-0 h-[50%] pointer-events-none z-0">
-                  <div className="p-8 space-y-1 font-sans text-gray-900 leading-tight" style={{ fontSize: `${fontSize}pt` }}>
-                    <PreviewRow label="Patient Name" value={parsedData.name} />
-                    <PreviewRow label="Address" value={parsedData.address} />
-                    <PreviewRow label="City, State" value={parsedData.cityStateZip} />
-                    <PreviewRow label="Home Phone" value={parsedData.homePhone} />
-                    <PreviewRow label="Day Phone" value={parsedData.daytimePhone} />
-                    <PreviewRow label="DOB" value={parsedData.dob} />
-                    <PreviewRow label="Age" value={parsedData.age} />
-                    <PreviewRow label="Sex" value={parsedData.sex} />
-                    {(parsedData.emergencyContact || parsedData.emergencyPhone) && (
-                        <>
-                         <div className="h-2"></div>
-                         <PreviewRow label="Emg. Contact" value={parsedData.emergencyContact} />
-                         <PreviewRow label="Emg. Phone" value={parsedData.emergencyPhone} />
-                        </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Images Layer */}
-                {images.map((img, index) => (
-                  <div
-                    key={img.id}
-                    className="image-container"
-                    style={{
-                      position: 'absolute',
-                      left: img.x,
-                      top: img.y,
-                      width: img.width,
-                      height: img.height,
-                      transform: `rotate(${img.rotation || 0}deg)`, // Apply rotation
-                      border: selectedImageId === img.id ? '2px solid #3b82f6' : '1px solid transparent',
-                      cursor: 'move',
-                      zIndex: 10 + index 
-                    }}
-                    onMouseDown={(e) => handleMouseDown(e, img.id, 'move')}
+            {/* PREVIEW CONTAINER - ZOOMED OUT */}
+            <div className="flex-1 w-full bg-gray-200 rounded border border-gray-300 overflow-auto flex justify-center items-start p-8">
+              
+              {/* Scale Wrapper to fit the huge paper on screen */}
+              <div style={{ transform: `scale(${VIEW_SCALE})`, transformOrigin: 'top center' }}>
+                  
+                  {/* The Actual "Paper" at Full 96DPI Resolution */}
+                  <div 
+                    className="bg-white shadow-2xl relative transition-all duration-200 ease-in-out overflow-hidden" 
+                    style={{ width: `${PDF_WIDTH_PX}px`, height: `${PDF_HEIGHT_PX}px` }}
+                    onMouseDown={(e) => e.stopPropagation()} 
                   >
-                    <img 
-                      src={img.src} 
-                      alt={`Paste ${index}`} 
-                      className="w-full h-full object-contain pointer-events-none select-none" 
-                    />
                     
-                    {/* Controls (Only show when selected) */}
-                    {selectedImageId === img.id && (
-                      <>
-                        {/* Rotate Handle */}
-                        <div 
-                           className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-white text-blue-600 rounded-full p-1 shadow border cursor-pointer hover:bg-blue-50 z-50"
-                           onMouseDown={(e) => handleMouseDown(e, img.id, 'rotate')}
-                           title="Rotate"
-                        >
-                            <RotateCw size={14} />
-                        </div>
+                    {/* Text Layer */}
+                    <div className="absolute top-0 left-0 right-0 pointer-events-none z-0">
+                      {/* Note: We scale margins/padding manually to match PDF roughly in PX */}
+                      <div className="space-y-1 font-sans text-gray-900 leading-tight" 
+                           style={{ 
+                               fontSize: `${fontSize}pt`, 
+                               padding: '60px' // Approx 15mm in px
+                           }}>
+                        <PreviewRow label="Patient Name" value={parsedData.name} />
+                        <PreviewRow label="Address" value={parsedData.address} />
+                        <PreviewRow label="City, State" value={parsedData.cityStateZip} />
+                        <PreviewRow label="Home Phone" value={parsedData.homePhone} />
+                        <PreviewRow label="Day Phone" value={parsedData.daytimePhone} />
+                        <PreviewRow label="DOB" value={parsedData.dob} />
+                        <PreviewRow label="Age" value={parsedData.age} />
+                        <PreviewRow label="Sex" value={parsedData.sex} />
+                        {(parsedData.emergencyContact || parsedData.emergencyPhone) && (
+                            <>
+                            <div style={{ height: `${fontSize}pt` }}></div>
+                            <PreviewRow label="Emg. Contact" value={parsedData.emergencyContact} />
+                            <PreviewRow label="Emg. Phone" value={parsedData.emergencyPhone} />
+                            </>
+                        )}
+                      </div>
+                    </div>
 
-                        {/* Delete Button */}
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); removeImage(img.id); }}
-                          className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1 shadow hover:bg-red-600 z-50"
-                          title="Delete"
-                        >
-                          <X size={12} />
-                        </button>
-
-                        {/* Resize Handle */}
-                        <div 
-                          className="absolute bottom-0 right-0 w-4 h-4 bg-blue-500 cursor-nwse-resize rounded-tl z-50"
-                          onMouseDown={(e) => handleMouseDown(e, img.id, 'resize')}
+                    {/* Images Layer */}
+                    {images.map((img, index) => (
+                      <div
+                        key={img.id}
+                        className="image-container"
+                        style={{
+                          position: 'absolute',
+                          left: img.x,
+                          top: img.y,
+                          width: img.width,
+                          height: img.height,
+                          transform: `rotate(${img.rotation || 0}deg)`,
+                          border: selectedImageId === img.id ? '3px solid #3b82f6' : '1px solid transparent',
+                          cursor: 'move',
+                          zIndex: 10 + index 
+                        }}
+                        onMouseDown={(e) => handleMouseDown(e, img.id, 'move')}
+                      >
+                        <img 
+                          src={img.src} 
+                          alt={`Paste ${index}`} 
+                          className="w-full h-full object-contain pointer-events-none select-none" 
                         />
-                      </>
-                    )}
-                  </div>
-                ))}
-                
-                {images.length === 0 && (
-                  <div className="absolute bottom-4 left-0 right-0 text-center text-gray-300 text-sm pointer-events-none">
-                     (Ctrl+V to Paste Images Here)
-                  </div>
-                )}
+                        
+                        {/* Controls */}
+                        {selectedImageId === img.id && (
+                          <>
+                            {/* Rotate Handle */}
+                            <div 
+                              className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-white text-blue-600 rounded-full p-2 shadow-lg border cursor-pointer hover:bg-blue-50 z-50"
+                              onMouseDown={(e) => handleMouseDown(e, img.id, 'rotate')}
+                              title="Rotate"
+                            >
+                                <RotateCw size={20} />
+                            </div>
 
+                            {/* Delete Button */}
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeImage(img.id); }}
+                              className="absolute -top-4 -right-4 bg-red-500 text-white rounded-full p-1.5 shadow-lg hover:bg-red-600 z-50"
+                              title="Delete"
+                            >
+                              <X size={16} />
+                            </button>
+
+                            {/* Resize Handle */}
+                            <div 
+                              className="absolute bottom-0 right-0 w-6 h-6 bg-blue-500 cursor-nwse-resize rounded-tl z-50"
+                              onMouseDown={(e) => handleMouseDown(e, img.id, 'resize')}
+                            />
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    
+                    {images.length === 0 && (
+                      <div className="absolute bottom-10 left-0 right-0 text-center text-gray-300 text-xl pointer-events-none">
+                        (Ctrl+V to Paste Images Here)
+                      </div>
+                    )}
+
+                  </div>
               </div>
             </div>
-          </div>
 
-          <button onClick={generatePDF} disabled={!parsedData.name} className={`w-full py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg font-bold text-white transition-all ${parsedData.name ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}>
-            <Download size={24} /> {parsedData.name ? 'Download PDF' : 'Paste Data to Enable'}
-          </button>
+            <button onClick={generatePDF} disabled={!parsedData.name} className={`w-full mt-4 py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg font-bold text-white transition-all ${parsedData.name ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}>
+              <Download size={24} /> {parsedData.name ? 'Download PDF' : 'Paste Data to Enable'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -469,7 +477,7 @@ const PreviewRow = ({ label, value }) => {
   if (!value) return null;
   return (
     <div className="flex">
-      <span className="font-bold w-[40%] opacity-70">{label}:</span>
+      <span className="font-bold w-[250px] opacity-70 flex-shrink-0">{label}:</span>
       <span className="flex-1">{value}</span>
     </div>
   );
