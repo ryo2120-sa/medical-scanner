@@ -33,7 +33,7 @@ const App = () => {
       return '';
     };
 
-    // Construct Data Object (No Insurance)
+    // Construct Data Object (Demographics & Emergency Only)
     const data = {
       name: findValue('Patient Name'),
       address: findValue('Address'),
@@ -48,7 +48,6 @@ const App = () => {
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
-      // Referral removed previously, Insurance removed now.
     };
     
     setParsedData(data);
@@ -150,8 +149,11 @@ const App = () => {
             </div>
 
             <div className="flex-1 bg-gray-200 rounded border border-gray-300 p-4 overflow-auto flex justify-center items-start">
+              {/* White Paper Background */}
               <div className="bg-white shadow-2xl relative transition-all duration-200 ease-in-out" style={{ width: '400px', height: '517px' }}>
-                <div className="absolute top-0 left-0 right-0 h-[50%] border-b-2 border-dashed border-red-300 bg-blue-50/20">
+                
+                {/* Clean container for top half (no red line, no background) */}
+                <div className="absolute top-0 left-0 right-0 h-[50%]">
                   <div className="p-8 space-y-1 font-sans text-gray-900 leading-tight" style={{ fontSize: `${fontSize}pt` }}>
                     <PreviewRow label="Patient Name" value={parsedData.name} />
                     <PreviewRow label="Address" value={parsedData.address} />
@@ -172,9 +174,7 @@ const App = () => {
                         </>
                     )}
                   </div>
-                  <div className="absolute bottom-2 right-2 text-xs text-red-400 font-bold opacity-0 group-hover:opacity-100">Bottom of Half-Page</div>
                 </div>
-                <div className="absolute bottom-4 w-full text-center text-gray-300 text-sm">(Bottom Half - Empty)</div>
               </div>
             </div>
           </div>
