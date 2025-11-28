@@ -13,18 +13,44 @@ const App = () => {
   }, [inputText]);
 
   const parseData = (text) => {
+    // 1. Basic Label: Value Parser
     const findValue = (label) => {
       try {
-        // Look for Label followed by colon or space, taking the rest of the line
         const regex = new RegExp(`${label}\\s*[:;]?\\s*(.*)`, 'i');
         const match = text.match(regex);
         return match ? match[1].trim() : '';
-      } catch (e) {
-        return '';
-      }
+      } catch (e) { return ''; }
     };
 
-    // Extract specific fields (Referral removed)
+    // 2. Smart Insurance Table Parser (for lines like: P MEDICARE NAME ID PHONE)
+    const parseInsuranceLine = (fullText) => {
+      // Look for a line starting with P (Primary) followed by distinct columns
+      // Regex Logic: P [space] (Carrier) [space] (Name) [space] (ID) [space] (Phone)
+      // We use the Phone number (digits/dashes) as an anchor at the end
+      const regex = /^[PS]\s+(.+?)\s+(.+?)\s+([A-Z0-9]{5,})\s+([0-9]{3}[-/][0-9]{3}[-/][0-9]{4}.*)/m;
+      const match = fullText.match(regex);
+
+      if (match) {
+        return {
+          carrier: match[1].trim(),
+          name: match[2].trim(),
+          id: match[3].trim(),
+          phone: match[4].trim()
+        };
+      }
+      
+      // Fallback: Look for explicit labels if the table parse fails
+      return {
+        carrier: findValue('Insurance Carrier') || findValue('Carrier'),
+        name: findValue('Insured Name') || findValue('Insured'),
+        id: findValue('Insured ID') || findValue('Member ID'),
+        phone: findValue('Insurance Phone') || findValue('Ins Phone')
+      };
+    };
+
+    const insData = parseInsuranceLine(text);
+
+    // Extract Data
     const data = {
       name: findValue('Patient Name'),
       address: findValue('Address'),
@@ -36,9 +62,12 @@ const App = () => {
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
-      insurance: findValue('Insurance Carrier') || findValue('Primary Insurance'),
-      subscriber: findValue('Insured ID') || findValue('Member ID') || findValue('Policy Number'),
-      group: findValue('Group') || findValue('Group Number'),
+      
+      // Detailed Insurance Info
+      insCarrier: insData.carrier,
+      insName: insData.name,
+      insId: insData.id,
+      insPhone: insData.phone
     };
     
     setParsedData(data);
@@ -48,12 +77,11 @@ const App = () => {
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
-      format: 'letter' // 215.9mm x 279.4mm
+      format: 'letter'
     });
 
     const marginLeft = 15;
     const marginTop = 15;
-    // Calculate line height based on font size
     const lineHeight = (fontSize * 0.3527) * 1.5; 
 
     doc.setFontSize(fontSize);
@@ -61,14 +89,12 @@ const App = () => {
     let currentY = marginTop;
 
     const printLine = (label, value) => {
-      // Skip empty fields, but always show insurance header if insurance exists
-      if (!value && !label.includes("Insurance")) return;
+      if (!value) return;
       
       doc.setFont("helvetica", "bold");
       doc.text(`${label}:`, marginLeft, currentY);
       
       doc.setFont("helvetica", "normal");
-      // Offset value by 50mm to align columns
       doc.text(value || "", marginLeft + 50, currentY);
       
       currentY += lineHeight;
@@ -90,18 +116,19 @@ const App = () => {
         printLine("Emerg. Phone", parsedData.emergencyPhone);
     }
     
-    if (parsedData.insurance) {
+    // Insurance Section
+    if (parsedData.insCarrier || parsedData.insId) {
       currentY += lineHeight / 2;
       doc.setFont("helvetica", "bolditalic");
       doc.text("--- Insurance Information ---", marginLeft, currentY);
       currentY += lineHeight;
       
-      printLine("Carrier", parsedData.insurance);
-      printLine("Subscriber ID", parsedData.subscriber);
-      printLine("Group #", parsedData.group);
+      printLine("Ins. Carrier", parsedData.insCarrier);
+      printLine("Insured Name", parsedData.insName);
+      printLine("Insured ID", parsedData.insId);
+      printLine("Ins. Phone", parsedData.insPhone);
     }
 
-    // Save
     doc.save(`${parsedData.name || 'document'}_top_half.pdf`);
   };
 
@@ -109,10 +136,8 @@ const App = () => {
     <div className="min-h-screen bg-gray-100 p-4 font-sans text-gray-800">
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
         
-        {/* LEFT COLUMN: Input & Controls */}
+        {/* LEFT COLUMN */}
         <div className="flex flex-col gap-4">
-          
-          {/* Paste Area */}
           <div className="bg-white rounded-xl shadow-md p-6 flex flex-col h-[50vh] lg:h-[60vh]">
             <div className="flex items-center gap-2 mb-4 border-b pb-4">
               <Clipboard className="text-blue-600" />
@@ -120,7 +145,7 @@ const App = () => {
             </div>
             <textarea 
               className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder={`Paste here...\n\nPatient Name: John Doe\nEmergency Phone: 210-555-0123...`}
+              placeholder={`Paste raw text here.\n\nExample Insurance Format:\nP MEDICARE JOHN DOE 12345ABC 800-555-0000\n\nOR with Labels:\nInsurance Carrier: Medicare\nInsured ID: 12345`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
             />
@@ -129,44 +154,24 @@ const App = () => {
             </button>
           </div>
 
-          {/* Font Controls */}
           <div className="bg-white rounded-xl shadow-md p-6">
             <div className="flex items-center gap-2 mb-4 border-b pb-4">
               <Type className="text-purple-600" />
               <h2 className="text-xl font-bold">2. Adjust Text Size</h2>
             </div>
-            
             <div className="flex items-center gap-4">
-              {/* Decrease Button (Min 4) */}
-              <button onClick={() => setFontSize(f => Math.max(4, f - 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
-                <Minus size={16}/>
-              </button>
-              
+              <button onClick={() => setFontSize(f => Math.max(4, f - 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300"><Minus size={16}/></button>
               <div className="flex-1">
-                <input 
-                  type="range" 
-                  min="4" 
-                  max="24" 
-                  value={fontSize} 
-                  onChange={(e) => setFontSize(Number(e.target.value))}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                />
-                <div className="text-center mt-2 font-mono text-sm text-gray-600">
-                  Size: {fontSize}pt
-                </div>
+                <input type="range" min="4" max="24" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                <div className="text-center mt-2 font-mono text-sm text-gray-600">Size: {fontSize}pt</div>
               </div>
-
-              {/* Increase Button */}
-              <button onClick={() => setFontSize(f => Math.min(30, f + 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
-                <Plus size={16}/>
-              </button>
+              <button onClick={() => setFontSize(f => Math.min(30, f + 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300"><Plus size={16}/></button>
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Preview & Download */}
+        {/* RIGHT COLUMN */}
         <div className="flex flex-col h-full">
-          
           <div className="bg-white rounded-xl shadow-md p-6 flex-1 mb-6 flex flex-col">
              <div className="flex items-center justify-between mb-4 border-b pb-4">
               <div className="flex items-center gap-2">
@@ -175,17 +180,9 @@ const App = () => {
               </div>
             </div>
 
-            {/* Simulated Paper Background */}
             <div className="flex-1 bg-gray-200 rounded border border-gray-300 p-4 overflow-auto flex justify-center items-start">
-              
-              {/* The Paper Sheet (Scaled for screen) */}
-              <div className="bg-white shadow-2xl relative transition-all duration-200 ease-in-out" 
-                   style={{ width: '400px', height: '517px' }}>
-                
-                {/* The "Top Half" Printable Area Indicator */}
+              <div className="bg-white shadow-2xl relative transition-all duration-200 ease-in-out" style={{ width: '400px', height: '517px' }}>
                 <div className="absolute top-0 left-0 right-0 h-[50%] border-b-2 border-dashed border-red-300 bg-blue-50/20">
-                  
-                  {/* The Actual Text Content with dynamic font size */}
                   <div className="p-8 space-y-1 font-sans text-gray-900 leading-tight" style={{ fontSize: `${fontSize}pt` }}>
                     <PreviewRow label="Patient Name" value={parsedData.name} />
                     <PreviewRow label="Address" value={parsedData.address} />
@@ -203,40 +200,26 @@ const App = () => {
                         </>
                     )}
 
-                    {parsedData.insurance && (
+                    {(parsedData.insCarrier || parsedData.insId) && (
                       <>
                         <div className="py-2 font-bold italic opacity-75">--- Insurance ---</div>
-                        <PreviewRow label="Carrier" value={parsedData.insurance} />
-                        <PreviewRow label="Sub ID" value={parsedData.subscriber} />
-                        <PreviewRow label="Group" value={parsedData.group} />
+                        <PreviewRow label="Carrier" value={parsedData.insCarrier} />
+                        <PreviewRow label="Insured" value={parsedData.insName} />
+                        <PreviewRow label="ID" value={parsedData.insId} />
+                        <PreviewRow label="Phone" value={parsedData.insPhone} />
                       </>
                     )}
                   </div>
-
-                  {/* Warning if text overflows half page */}
-                  <div className="absolute bottom-2 right-2 text-xs text-red-400 font-bold opacity-0 group-hover:opacity-100">
-                    Bottom of Half-Page
-                  </div>
+                  <div className="absolute bottom-2 right-2 text-xs text-red-400 font-bold opacity-0 group-hover:opacity-100">Bottom of Half-Page</div>
                 </div>
-
-                <div className="absolute bottom-4 w-full text-center text-gray-300 text-sm">
-                  (Bottom Half - Empty)
-                </div>
+                <div className="absolute bottom-4 w-full text-center text-gray-300 text-sm">(Bottom Half - Empty)</div>
               </div>
             </div>
           </div>
 
-          <button 
-            onClick={generatePDF}
-            disabled={!parsedData.name}
-            className={`w-full py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg font-bold text-white transition-all
-              ${parsedData.name ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}
-            `}
-          >
-            <Download size={24} /> 
-            {parsedData.name ? 'Download PDF' : 'Paste Data to Enable'}
+          <button onClick={generatePDF} disabled={!parsedData.name} className={`w-full py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg font-bold text-white transition-all ${parsedData.name ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}>
+            <Download size={24} /> {parsedData.name ? 'Download PDF' : 'Paste Data to Enable'}
           </button>
-
         </div>
       </div>
     </div>
