@@ -29,8 +29,11 @@ const App = () => {
       name: findValue('Patient Name'),
       address: findValue('Address'),
       cityStateZip: findValue('City, State, Zip'),
-      homePhone: findValue('Home Phone Number'),       // Separated
-      daytimePhone: findValue('Daytime Phone Number'), // Separated
+      homePhone: findValue('Home Phone Number'),
+      daytimePhone: findValue('Daytime Phone Number'),
+      // Added Emergency Fields
+      emergencyContact: findValue('Emergency Contact'),
+      emergencyPhone: findValue('Emergency Phone') || findValue('Emergency Phone Number'), 
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
@@ -77,12 +80,18 @@ const App = () => {
     printLine("Patient Name", parsedData.name);
     printLine("Address", parsedData.address);
     printLine("City, State, Zip", parsedData.cityStateZip);
-    printLine("Home Phone", parsedData.homePhone);       // Added
-    printLine("Daytime Phone", parsedData.daytimePhone); // Added
+    printLine("Home Phone", parsedData.homePhone);
+    printLine("Daytime Phone", parsedData.daytimePhone);
     printLine("Date of Birth", parsedData.dob);
     printLine("Age", parsedData.age);
     printLine("Sex", parsedData.sex);
     printLine("Referral", parsedData.referral);
+    
+    // Emergency Section
+    if (parsedData.emergencyContact || parsedData.emergencyPhone) {
+        printLine("Emerg. Contact", parsedData.emergencyContact);
+        printLine("Emerg. Phone", parsedData.emergencyPhone);
+    }
     
     if (parsedData.insurance) {
       currentY += lineHeight / 2;
@@ -114,7 +123,7 @@ const App = () => {
             </div>
             <textarea 
               className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder={`Paste here...\n\nPatient Name: John Doe\nHome Phone Number: 555-0199...`}
+              placeholder={`Paste here...\n\nPatient Name: John Doe\nEmergency Phone: 210-555-0123...`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
             />
@@ -139,7 +148,7 @@ const App = () => {
               <div className="flex-1">
                 <input 
                   type="range" 
-                  min="4"  // Changed from 8 to 4
+                  min="4" 
                   max="24" 
                   value={fontSize} 
                   onChange={(e) => setFontSize(Number(e.target.value))}
@@ -191,6 +200,13 @@ const App = () => {
                     <PreviewRow label="Sex" value={parsedData.sex} />
                     <PreviewRow label="Referral" value={parsedData.referral} />
                     
+                    {(parsedData.emergencyContact || parsedData.emergencyPhone) && (
+                        <>
+                         <PreviewRow label="Emg. Contact" value={parsedData.emergencyContact} />
+                         <PreviewRow label="Emg. Phone" value={parsedData.emergencyPhone} />
+                        </>
+                    )}
+
                     {parsedData.insurance && (
                       <>
                         <div className="py-2 font-bold italic opacity-75">--- Insurance ---</div>
