@@ -13,20 +13,27 @@ const App = () => {
 
   const parseData = (text) => {
     // 1. Basic Demographics Parser
-    const findValue = (label) => {
-      try {
-        const regex = new RegExp(`${label}\\s*[:;]?\\s*(.*)`, 'i');
-        const match = text.match(regex);
-        return match ? match[1].trim() : '';
-      } catch (e) { return ''; }
+    const findValue = (labels) => {
+      // Allow passing a single string or an array of possible labels
+      const labelArray = Array.isArray(labels) ? labels : [labels];
+      
+      for (const label of labelArray) {
+        try {
+          const regex = new RegExp(`${label}\\s*[:;]?\\s*(.*)`, 'i');
+          const match = text.match(regex);
+          // If match found and it's not empty, return it
+          if (match && match[1].trim()) {
+            return match[1].trim();
+          }
+        } catch (e) { continue; }
+      }
+      return '';
     };
 
     // 2. Multi-Line Insurance Parser
-    // Finds lines like: P MEDICARE NAME ID PHONE
     const parseInsurances = (fullText) => {
       const results = [];
-      // Regex: Start with P/S -> Carrier -> Name -> ID -> Phone
-      // Uses 'gm' flag to find ALL occurrences
+      // Regex: P/S -> Carrier -> Name -> ID -> Phone
       const regex = /^([PS])\s+(.+?)\s+(.+?)\s+([A-Z0-9]{5,})\s+([0-9]{3}[-/][0-9]{3}[-/][0-9]{4}.*)/gm;
       const matches = [...fullText.matchAll(regex)];
 
@@ -40,16 +47,16 @@ const App = () => {
         });
       });
 
-      // Fallback: If regex fails but labels exist (for at least one)
+      // Fallback if no table format found
       if (results.length === 0) {
-        const fallbackCarrier = findValue('Insurance Carrier') || findValue('Carrier');
+        const fallbackCarrier = findValue(['Insurance Carrier', 'Carrier', 'Primary Insurance']);
         if (fallbackCarrier) {
           results.push({
             type: 'Primary',
             carrier: fallbackCarrier,
-            name: findValue('Insured Name') || findValue('Insured'),
-            id: findValue('Insured ID') || findValue('Member ID'),
-            phone: findValue('Insurance Phone') || findValue('Ins Phone')
+            name: findValue(['Insured Name', 'Insured']),
+            id: findValue(['Insured ID', 'Member ID', 'Policy Number']),
+            phone: findValue(['Insurance Phone', 'Ins Phone', 'Carrier Phone'])
           });
         }
       }
@@ -58,18 +65,22 @@ const App = () => {
     };
 
     // Construct Data Object
+    // checks multiple variations of labels now
     const data = {
       name: findValue('Patient Name'),
       address: findValue('Address'),
       cityStateZip: findValue('City, State, Zip'),
-      homePhone: findValue('Home Phone Number'),
-      daytimePhone: findValue('Daytime Phone Number'),
-      emergencyContact: findValue('Emergency Contact'),
-      emergencyPhone: findValue('Emergency Phone') || findValue('Emergency Phone Number'), 
+      
+      // Phone logic: Checks "Home Phone Number", then "Home Phone", etc.
+      homePhone: findValue(['Home Phone Number', 'Home Phone']),
+      daytimePhone: findValue(['Daytime Phone Number', 'Daytime Phone', 'Work Phone', 'Cell Phone']),
+      
+      emergencyContact: findValue(['Emergency Contact', 'Emerg Contact']),
+      emergencyPhone: findValue(['Emergency Phone', 'Emergency Phone Number', 'Emerg Phone']), 
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
-      insurances: parseInsurances(text) // Array of insurance objects
+      insurances: parseInsurances(text)
     };
     
     setParsedData(data);
@@ -91,11 +102,13 @@ const App = () => {
     let currentY = marginTop;
 
     const printLine = (label, value) => {
-      if (!value) return;
+      // CRITICAL: If value is empty, do nothing. This collapses the whitespace.
+      if (!value) return; 
+      
       doc.setFont("helvetica", "bold");
       doc.text(`${label}:`, marginLeft, currentY);
       doc.setFont("helvetica", "normal");
-      doc.text(value || "", marginLeft + 50, currentY);
+      doc.text(value, marginLeft + 50, currentY);
       currentY += lineHeight;
     };
 
@@ -103,14 +116,19 @@ const App = () => {
     printLine("Patient Name", parsedData.name);
     printLine("Address", parsedData.address);
     printLine("City, State, Zip", parsedData.cityStateZip);
+    
+    // These will automatically be skipped if empty
     printLine("Home Phone", parsedData.homePhone);
     printLine("Daytime Phone", parsedData.daytimePhone);
+    
     printLine("Date of Birth", parsedData.dob);
     printLine("Age", parsedData.age);
     printLine("Sex", parsedData.sex);
     
     // --- Emergency ---
     if (parsedData.emergencyContact || parsedData.emergencyPhone) {
+        // Add a tiny gap before emergency section if it exists
+        if(parsedData.emergencyContact) currentY += lineHeight * 0.2; 
         printLine("Emerg. Contact", parsedData.emergencyContact);
         printLine("Emerg. Phone", parsedData.emergencyPhone);
     }
@@ -119,7 +137,6 @@ const App = () => {
     parsedData.insurances.forEach((ins, index) => {
       currentY += lineHeight / 2; // Spacer
       doc.setFont("helvetica", "bolditalic");
-      // Header: "Primary Insurance" or "Secondary Insurance"
       doc.text(`--- ${ins.type || 'Insurance'} (${index + 1}) ---`, marginLeft, currentY);
       currentY += lineHeight;
       
@@ -187,20 +204,23 @@ const App = () => {
                     <PreviewRow label="Patient Name" value={parsedData.name} />
                     <PreviewRow label="Address" value={parsedData.address} />
                     <PreviewRow label="City, State" value={parsedData.cityStateZip} />
+                    
+                    {/* These rows will automatically hide if data is empty */}
                     <PreviewRow label="Home Phone" value={parsedData.homePhone} />
                     <PreviewRow label="Day Phone" value={parsedData.daytimePhone} />
+                    
                     <PreviewRow label="DOB" value={parsedData.dob} />
                     <PreviewRow label="Age" value={parsedData.age} />
                     <PreviewRow label="Sex" value={parsedData.sex} />
                     
                     {(parsedData.emergencyContact || parsedData.emergencyPhone) && (
                         <>
+                         <div className="h-2"></div>
                          <PreviewRow label="Emg. Contact" value={parsedData.emergencyContact} />
                          <PreviewRow label="Emg. Phone" value={parsedData.emergencyPhone} />
                         </>
                     )}
 
-                    {/* Loop through all found insurances */}
                     {parsedData.insurances.map((ins, i) => (
                       <React.Fragment key={i}>
                         <div className="py-2 font-bold italic opacity-75 border-b border-dashed border-gray-300 mt-2 mb-1">
