@@ -4,7 +4,7 @@ import { FileText, Download, Eraser, Clipboard, Type, Minus, Plus } from 'lucide
 
 const App = () => {
   const [inputText, setInputText] = useState('');
-  const [parsedData, setParsedData] = useState({ insurances: [] });
+  const [parsedData, setParsedData] = useState({});
   const [fontSize, setFontSize] = useState(14);
 
   useEffect(() => {
@@ -12,7 +12,7 @@ const App = () => {
   }, [inputText]);
 
   const parseData = (text) => {
-    // 1. Basic Demographics Parser
+    // 1. Basic Value Parser
     const findValue = (labels) => {
       const labelArray = Array.isArray(labels) ? labels : [labels];
       
@@ -33,50 +33,7 @@ const App = () => {
       return '';
     };
 
-    // 2. Multi-Line Insurance Parser
-    const parseInsurances = (fullText) => {
-      const results = [];
-      
-      // Regex Logic:
-      // 1. Start with P or S
-      // 2. Carrier & Name (lazy match)
-      // 3. ID (Alphanumeric, at least 3 chars)
-      // 4. Group (Optional - surrounded by non-capturing group)
-      // 5. Phone (Starts with digit)
-      const regex = /^([PS])\s+(.+?)\s+(.+?)\s+([A-Z0-9-]{3,})\s+(?:([A-Z0-9-]{3,})\s+)?([0-9].*)/gm;
-      
-      const matches = [...fullText.matchAll(regex)];
-
-      matches.forEach(match => {
-        results.push({
-          type: match[1] === 'P' ? 'Primary' : 'Secondary',
-          carrier: match[2].trim(),
-          name: match[3].trim(),
-          id: match[4].trim(),
-          group: match[5] ? match[5].trim() : '', // Capture group 5 is the optional Group #
-          phone: match[6].trim()
-        });
-      });
-
-      // Fallback: If regex fails, look for explicit labels (Primary only)
-      if (results.length === 0) {
-        const fallbackCarrier = findValue(['Insurance Carrier', 'Carrier', 'Primary Insurance']);
-        if (fallbackCarrier) {
-          results.push({
-            type: 'Primary',
-            carrier: fallbackCarrier,
-            name: findValue(['Insured Name', 'Insured']),
-            id: findValue(['Insured ID', 'Member ID', 'Policy Number']),
-            group: findValue(['Group', 'Group Number', 'Group #']),
-            phone: findValue(['Insurance Phone', 'Ins Phone', 'Carrier Phone'])
-          });
-        }
-      }
-
-      return results;
-    };
-
-    // Construct Data Object
+    // Construct Data Object (No Insurance)
     const data = {
       name: findValue('Patient Name'),
       address: findValue('Address'),
@@ -87,10 +44,11 @@ const App = () => {
       
       emergencyContact: findValue(['Emergency Contact', 'Emerg Contact']),
       emergencyPhone: findValue(['Emergency Phone', 'Emergency Phone Number', 'Emerg Phone']), 
+      
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
-      insurances: parseInsurances(text)
+      // Referral removed previously, Insurance removed now.
     };
     
     setParsedData(data);
@@ -140,20 +98,6 @@ const App = () => {
         printLine("Emerg. Phone", parsedData.emergencyPhone);
     }
     
-    // --- Multiple Insurances ---
-    parsedData.insurances.forEach((ins, index) => {
-      currentY += lineHeight / 2;
-      doc.setFont("helvetica", "bolditalic");
-      doc.text(`--- ${ins.type || 'Insurance'} (${index + 1}) ---`, marginLeft, currentY);
-      currentY += lineHeight;
-      
-      printLine("Carrier", ins.carrier);
-      printLine("Insured Name", ins.name);
-      printLine("Insured ID", ins.id);
-      printLine("Group", ins.group); // Group follows ID
-      printLine("Ins. Phone", ins.phone);
-    });
-
     doc.save(`${parsedData.name || 'document'}_top_half.pdf`);
   };
 
@@ -170,7 +114,7 @@ const App = () => {
             </div>
             <textarea 
               className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder={`Paste raw text here...\n\nExample with Group:\nS USAA JOHN DOE A20471 002534 555-0199\n\nExample without Group:\nP MEDICARE JANE DOE 7DR9DY 855-252-8782`}
+              placeholder={`Paste raw text here...`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
             />
@@ -227,19 +171,6 @@ const App = () => {
                          <PreviewRow label="Emg. Phone" value={parsedData.emergencyPhone} />
                         </>
                     )}
-
-                    {parsedData.insurances.map((ins, i) => (
-                      <React.Fragment key={i}>
-                        <div className="py-2 font-bold italic opacity-75 border-b border-dashed border-gray-300 mt-2 mb-1">
-                          --- {ins.type} Insurance ---
-                        </div>
-                        <PreviewRow label="Carrier" value={ins.carrier} />
-                        <PreviewRow label="Insured" value={ins.name} />
-                        <PreviewRow label="ID" value={ins.id} />
-                        <PreviewRow label="Group" value={ins.group} />
-                        <PreviewRow label="Phone" value={ins.phone} />
-                      </React.Fragment>
-                    ))}
                   </div>
                   <div className="absolute bottom-2 right-2 text-xs text-red-400 font-bold opacity-0 group-hover:opacity-100">Bottom of Half-Page</div>
                 </div>
