@@ -1,195 +1,237 @@
-import React, { useState, useRef } from 'react';
-import Tesseract from 'tesseract.js';
+import React, { useState, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
-import { Camera, FileText, Download, RefreshCw, Loader2 } from 'lucide-react';
+import { FileText, Download, Eraser, Clipboard, Type, Minus, Plus } from 'lucide-react';
 
 const App = () => {
-  const [image, setImage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [parsedData, setParsedData] = useState(null);
-  
-  // This helps us parse the specific format from your screenshot
-  const parseOCRText = (text) => {
-    // Helper to extract text between a label and a newline
-    const extract = (label) => {
-      // Look for the label, allow for slight OCR errors (case insensitive)
-      const regex = new RegExp(`${label}\\s*[:;]\\s*([^\\n]+)`, 'i');
-      const match = text.match(regex);
-      return match ? match[1].trim() : '';
-    };
+  const [inputText, setInputText] = useState('');
+  const [parsedData, setParsedData] = useState({});
+  const [fontSize, setFontSize] = useState(14);
 
-    return {
-      patientName: extract('Patient Name'),
-      address: extract('Address'),
-      cityStateZip: extract('City, State, Zip'),
-      phone: extract('Home Phone Number'),
-      dob: extract('Date of Birth'),
-      age: extract('AGE'),
-      sex: extract('SEX'),
-      referral: extract('Referral'),
-      insurance: extract('Insurance Carrier'), // Might need adjusting based on exact OCR output
-      rawText: text // Keep raw text just in case
-    };
-  };
+  // Run parser when text changes
+  useEffect(() => {
+    parseData(inputText);
+  }, [inputText]);
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setImage(URL.createObjectURL(file));
-      setParsedData(null);
-      processImage(file);
-    }
-  };
-
-  const processImage = (file) => {
-    setLoading(true);
-    setProgress(0);
-
-    Tesseract.recognize(
-      file,
-      'eng',
-      {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            setProgress(parseInt(m.progress * 100));
-          }
-        },
+  const parseData = (text) => {
+    const findValue = (label) => {
+      // Look for Label followed by colon or space, taking the rest of the line
+      try {
+        const regex = new RegExp(`${label}\\s*[:;]?\\s*(.*)`, 'i');
+        const match = text.match(regex);
+        return match ? match[1].trim() : '';
+      } catch (e) {
+        return '';
       }
-    ).then(({ data: { text } }) => {
-      const data = parseOCRText(text);
-      setParsedData(data);
-      setLoading(false);
-    }).catch(err => {
-      console.error(err);
-      setLoading(false);
-      alert("Failed to scan image.");
-    });
+    };
+
+    // Extract specific fields
+    const data = {
+      name: findValue('Patient Name'),
+      address: findValue('Address'),
+      cityStateZip: findValue('City, State, Zip'),
+      phone: findValue('Home Phone Number') || findValue('Daytime Phone Number'),
+      dob: findValue('Date of Birth'),
+      age: findValue('AGE'),
+      sex: findValue('SEX'),
+      referral: findValue('Referral'),
+      insurance: findValue('Insurance Carrier') || findValue('Primary Insurance'),
+      subscriber: findValue('Insured ID') || findValue('Member ID') || findValue('Policy Number'),
+      group: findValue('Group') || findValue('Group Number'),
+    };
+    
+    setParsedData(data);
   };
 
   const generatePDF = () => {
-    if (!parsedData) return;
-
-    const doc = new jsPDF();
-    
-    // Header
-    doc.setFontSize(18);
-    doc.text("Patient Demographic Record", 105, 20, null, null, "center");
-    
-    // Content
-    doc.setFontSize(12);
-    let y = 40;
-    const lineHeight = 10;
-
-    const fields = [
-      { label: "Patient Name", value: parsedData.patientName },
-      { label: "Address", value: parsedData.address },
-      { label: "City, State, Zip", value: parsedData.cityStateZip },
-      { label: "Home Phone", value: parsedData.phone },
-      { label: "Date of Birth", value: parsedData.dob },
-      { label: "Age", value: parsedData.age },
-      { label: "Sex", value: parsedData.sex },
-      { label: "Referral", value: parsedData.referral },
-    ];
-
-    fields.forEach((field) => {
-      doc.setFont("helvetica", "bold");
-      doc.text(`${field.label}:`, 20, y);
-      doc.setFont("helvetica", "normal");
-      doc.text(field.value || "Not detected", 70, y);
-      y += lineHeight;
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'letter' // 215.9mm x 279.4mm
     });
 
-    // Footer timestamp
-    doc.setFontSize(10);
-    doc.text(`Scanned on: ${new Date().toLocaleDateString()}`, 20, 280);
+    const marginLeft = 15;
+    const marginTop = 15;
+    // Calculate line height based on font size
+    const lineHeight = (fontSize * 0.3527) * 1.5; 
 
-    doc.save(`${parsedData.patientName || 'patient'}_record.pdf`);
+    doc.setFontSize(fontSize);
+
+    let currentY = marginTop;
+
+    const printLine = (label, value) => {
+      if (!value && !label.includes("Insurance")) return;
+      
+      doc.setFont("helvetica", "bold");
+      doc.text(`${label}:`, marginLeft, currentY);
+      
+      doc.setFont("helvetica", "normal");
+      doc.text(value || "", marginLeft + 50, currentY);
+      
+      currentY += lineHeight;
+    };
+
+    // --- Content ---
+    printLine("Patient Name", parsedData.name);
+    printLine("Address", parsedData.address);
+    printLine("City, State, Zip", parsedData.cityStateZip);
+    printLine("Phone", parsedData.phone);
+    printLine("Date of Birth", parsedData.dob);
+    printLine("Age", parsedData.age);
+    printLine("Sex", parsedData.sex);
+    printLine("Referral", parsedData.referral);
+    
+    if (parsedData.insurance) {
+      currentY += lineHeight / 2;
+      doc.setFont("helvetica", "bolditalic");
+      doc.text("--- Insurance Information ---", marginLeft, currentY);
+      currentY += lineHeight;
+      
+      printLine("Carrier", parsedData.insurance);
+      printLine("Subscriber ID", parsedData.subscriber);
+      printLine("Group #", parsedData.group);
+    }
+
+    // Save
+    doc.save(`${parsedData.name || 'document'}_top_half.pdf`);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 font-sans">
-      <div className="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden">
+    <div className="min-h-screen bg-gray-100 p-4 font-sans text-gray-800">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
         
-        {/* Header */}
-        <div className="bg-blue-600 p-4 text-white flex items-center justify-between">
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <FileText size={20} /> DocScanner
-          </h1>
-        </div>
-
-        <div className="p-6">
-          {/* Upload Section */}
-          <div className="mb-6">
-            <label className="block w-full cursor-pointer bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg p-8 text-center hover:bg-blue-100 transition">
-              <input 
-                type="file" 
-                accept="image/*" 
-                capture="environment" // This triggers camera on mobile
-                className="hidden" 
-                onChange={handleImageUpload} 
-              />
-              <Camera className="mx-auto text-blue-500 mb-2" size={32} />
-              <span className="text-gray-600">Take Photo or Upload</span>
-            </label>
+        {/* LEFT COLUMN: Input & Controls */}
+        <div className="flex flex-col gap-4">
+          
+          {/* Paste Area */}
+          <div className="bg-white rounded-xl shadow-md p-6 flex flex-col h-[50vh] lg:h-[60vh]">
+            <div className="flex items-center gap-2 mb-4 border-b pb-4">
+              <Clipboard className="text-blue-600" />
+              <h2 className="text-xl font-bold">1. Paste Data</h2>
+            </div>
+            <textarea 
+              className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              placeholder={`Paste here...\n\nPatient Name: John Doe\nAddress: 123 Main St...`}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+            />
+            <button onClick={() => setInputText('')} className="mt-4 text-gray-500 flex gap-2 items-center text-sm">
+              <Eraser size={16} /> Clear Text
+            </button>
           </div>
 
-          {/* Loading State */}
-          {loading && (
-            <div className="text-center py-4">
-              <Loader2 className="animate-spin mx-auto text-blue-600 mb-2" />
-              <p className="text-gray-600">Scanning document... {progress}%</p>
+          {/* Font Controls */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <div className="flex items-center gap-2 mb-4 border-b pb-4">
+              <Type className="text-purple-600" />
+              <h2 className="text-xl font-bold">2. Adjust Text Size</h2>
             </div>
-          )}
-
-          {/* Preview Section */}
-          {image && !loading && (
-            <div className="mb-6">
-              <h3 className="font-bold text-gray-700 mb-2">Image Preview:</h3>
-              <img src={image} alt="Preview" className="w-full rounded border" />
-            </div>
-          )}
-
-          {/* Data Review Section */}
-          {parsedData && !loading && (
-            <div className="animate-fade-in">
-              <h3 className="font-bold text-gray-700 mb-2 border-b pb-2">Extracted Data:</h3>
+            
+            <div className="flex items-center gap-4">
+              <button onClick={() => setFontSize(f => Math.max(8, f - 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
+                <Minus size={16}/>
+              </button>
               
-              <div className="space-y-3 mb-6 bg-gray-50 p-4 rounded text-sm">
-                <DataRow label="Name" value={parsedData.patientName} />
-                <DataRow label="DOB" value={parsedData.dob} />
-                <DataRow label="Address" value={parsedData.address} />
-                <DataRow label="City/State" value={parsedData.cityStateZip} />
-                <DataRow label="Phone" value={parsedData.phone} />
+              <div className="flex-1">
+                <input 
+                  type="range" 
+                  min="8" 
+                  max="24" 
+                  value={fontSize} 
+                  onChange={(e) => setFontSize(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="text-center mt-2 font-mono text-sm text-gray-600">
+                  Size: {fontSize}pt
+                </div>
               </div>
 
-              <button 
-                onClick={generatePDF}
-                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded flex items-center justify-center gap-2 transition"
-              >
-                <Download size={20} /> Download PDF
-              </button>
-              
-              <button 
-                onClick={() => window.location.reload()}
-                className="w-full mt-3 text-gray-500 text-sm flex items-center justify-center gap-1"
-              >
-                <RefreshCw size={14} /> Scan New Document
+              <button onClick={() => setFontSize(f => Math.min(30, f + 1))} className="p-2 bg-gray-200 rounded hover:bg-gray-300">
+                <Plus size={16}/>
               </button>
             </div>
-          )}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Preview & Download */}
+        <div className="flex flex-col h-full">
+          
+          <div className="bg-white rounded-xl shadow-md p-6 flex-1 mb-6 flex flex-col">
+             <div className="flex items-center justify-between mb-4 border-b pb-4">
+              <div className="flex items-center gap-2">
+                <FileText className="text-green-600" />
+                <h2 className="text-xl font-bold">3. Top-Half Preview</h2>
+              </div>
+            </div>
+
+            {/* Simulated Paper Background */}
+            <div className="flex-1 bg-gray-200 rounded border border-gray-300 p-4 overflow-auto flex justify-center items-start">
+              
+              {/* The Paper Sheet (Scaled for screen) */}
+              <div className="bg-white shadow-2xl relative transition-all duration-200 ease-in-out" 
+                   style={{ width: '400px', height: '517px' }}>
+                
+                {/* The "Top Half" Printable Area Indicator */}
+                <div className="absolute top-0 left-0 right-0 h-[50%] border-b-2 border-dashed border-red-300 bg-blue-50/20">
+                  
+                  {/* The Actual Text Content with dynamic font size */}
+                  <div className="p-8 space-y-1 font-sans text-gray-900 leading-tight" style={{ fontSize: `${fontSize}pt` }}>
+                    <PreviewRow label="Patient Name" value={parsedData.name} />
+                    <PreviewRow label="Address" value={parsedData.address} />
+                    <PreviewRow label="City, State" value={parsedData.cityStateZip} />
+                    <PreviewRow label="Phone" value={parsedData.phone} />
+                    <PreviewRow label="DOB" value={parsedData.dob} />
+                    <PreviewRow label="Age" value={parsedData.age} />
+                    <PreviewRow label="Sex" value={parsedData.sex} />
+                    <PreviewRow label="Referral" value={parsedData.referral} />
+                    
+                    {parsedData.insurance && (
+                      <>
+                        <div className="py-2 font-bold italic opacity-75">--- Insurance ---</div>
+                        <PreviewRow label="Carrier" value={parsedData.insurance} />
+                        <PreviewRow label="Sub ID" value={parsedData.subscriber} />
+                        <PreviewRow label="Group" value={parsedData.group} />
+                      </>
+                    )}
+                  </div>
+
+                  {/* Warning if text overflows half page */}
+                  <div className="absolute bottom-2 right-2 text-xs text-red-400 font-bold opacity-0 group-hover:opacity-100">
+                    Bottom of Half-Page
+                  </div>
+                </div>
+
+                <div className="absolute bottom-4 w-full text-center text-gray-300 text-sm">
+                  (Bottom Half - Empty)
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button 
+            onClick={generatePDF}
+            disabled={!parsedData.name}
+            className={`w-full py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg font-bold text-white transition-all
+              ${parsedData.name ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}
+            `}
+          >
+            <Download size={24} /> 
+            {parsedData.name ? 'Download PDF' : 'Paste Data to Enable'}
+          </button>
+
         </div>
       </div>
     </div>
   );
 };
 
-// Helper component for display
-const DataRow = ({ label, value }) => (
-  <div className="flex justify-between border-b border-gray-200 pb-1 last:border-0">
-    <span className="font-semibold text-gray-600">{label}:</span>
-    <span className="text-gray-900 text-right">{value || "---"}</span>
-  </div>
-);
+const PreviewRow = ({ label, value }) => {
+  if (!value) return null;
+  return (
+    <div className="flex">
+      <span className="font-bold w-[40%] opacity-70">{label}:</span>
+      <span className="flex-1">{value}</span>
+    </div>
+  );
+};
 
 export default App;
