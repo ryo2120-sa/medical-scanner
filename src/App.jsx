@@ -14,20 +14,17 @@ const App = () => {
   const parseData = (text) => {
     // 1. Basic Demographics Parser
     const findValue = (labels) => {
-      // Allow passing a single string or an array of possible labels
       const labelArray = Array.isArray(labels) ? labels : [labels];
       
       for (const label of labelArray) {
         try {
-          // FIX: We use [ \t] instead of \s. 
-          // \s includes newlines, which caused the bug of grabbing the next line.
-          // [ \t] only matches spaces and tabs on the SAME line.
+          // Strict regex: matches label on the same line only (no newlines)
           const regex = new RegExp(`${label}[ \\t]*[:;]?[ \\t]*(.*)`, 'i');
           const match = text.match(regex);
           
           if (match && match[1]) {
             const val = match[1].trim();
-            // Extra safety: If the value we grabbed looks like another label (ends in colon), ignore it
+            // Safety check: ignore if it looks like we accidentally grabbed another label
             if (val.includes(':') && val.length < 20) return '';
             return val;
           }
@@ -39,8 +36,15 @@ const App = () => {
     // 2. Multi-Line Insurance Parser
     const parseInsurances = (fullText) => {
       const results = [];
-      // Regex: P/S -> Carrier -> Name -> ID -> Phone
-      const regex = /^([PS])\s+(.+?)\s+(.+?)\s+([A-Z0-9]{5,})\s+([0-9]{3}[-/][0-9]{3}[-/][0-9]{4}.*)/gm;
+      
+      // Regex Logic:
+      // 1. Start with P or S
+      // 2. Carrier & Name (lazy match)
+      // 3. ID (Alphanumeric, at least 3 chars)
+      // 4. Group (Optional - surrounded by non-capturing group)
+      // 5. Phone (Starts with digit)
+      const regex = /^([PS])\s+(.+?)\s+(.+?)\s+([A-Z0-9-]{3,})\s+(?:([A-Z0-9-]{3,})\s+)?([0-9].*)/gm;
+      
       const matches = [...fullText.matchAll(regex)];
 
       matches.forEach(match => {
@@ -49,11 +53,12 @@ const App = () => {
           carrier: match[2].trim(),
           name: match[3].trim(),
           id: match[4].trim(),
-          phone: match[5].trim()
+          group: match[5] ? match[5].trim() : '', // Capture group 5 is the optional Group #
+          phone: match[6].trim()
         });
       });
 
-      // Fallback if no table format found
+      // Fallback: If regex fails, look for explicit labels (Primary only)
       if (results.length === 0) {
         const fallbackCarrier = findValue(['Insurance Carrier', 'Carrier', 'Primary Insurance']);
         if (fallbackCarrier) {
@@ -62,6 +67,7 @@ const App = () => {
             carrier: fallbackCarrier,
             name: findValue(['Insured Name', 'Insured']),
             id: findValue(['Insured ID', 'Member ID', 'Policy Number']),
+            group: findValue(['Group', 'Group Number', 'Group #']),
             phone: findValue(['Insurance Phone', 'Ins Phone', 'Carrier Phone'])
           });
         }
@@ -106,7 +112,6 @@ const App = () => {
     let currentY = marginTop;
 
     const printLine = (label, value) => {
-      // If value is empty, do nothing. This collapses the whitespace.
       if (!value) return; 
       
       doc.setFont("helvetica", "bold");
@@ -145,6 +150,7 @@ const App = () => {
       printLine("Carrier", ins.carrier);
       printLine("Insured Name", ins.name);
       printLine("Insured ID", ins.id);
+      printLine("Group", ins.group); // Group follows ID
       printLine("Ins. Phone", ins.phone);
     });
 
@@ -164,7 +170,7 @@ const App = () => {
             </div>
             <textarea 
               className="flex-1 w-full p-4 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-              placeholder={`Paste raw text here...`}
+              placeholder={`Paste raw text here...\n\nExample with Group:\nS USAA JOHN DOE A20471 002534 555-0199\n\nExample without Group:\nP MEDICARE JANE DOE 7DR9DY 855-252-8782`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
             />
@@ -230,6 +236,7 @@ const App = () => {
                         <PreviewRow label="Carrier" value={ins.carrier} />
                         <PreviewRow label="Insured" value={ins.name} />
                         <PreviewRow label="ID" value={ins.id} />
+                        <PreviewRow label="Group" value={ins.group} />
                         <PreviewRow label="Phone" value={ins.phone} />
                       </React.Fragment>
                     ))}
