@@ -24,20 +24,18 @@ const App = () => {
       }
     };
 
-    // Extract specific fields
+    // Extract specific fields (Referral removed)
     const data = {
       name: findValue('Patient Name'),
       address: findValue('Address'),
       cityStateZip: findValue('City, State, Zip'),
       homePhone: findValue('Home Phone Number'),
       daytimePhone: findValue('Daytime Phone Number'),
-      // Added Emergency Fields
       emergencyContact: findValue('Emergency Contact'),
       emergencyPhone: findValue('Emergency Phone') || findValue('Emergency Phone Number'), 
       dob: findValue('Date of Birth'),
       age: findValue('AGE'),
       sex: findValue('SEX'),
-      referral: findValue('Referral'),
       insurance: findValue('Insurance Carrier') || findValue('Primary Insurance'),
       subscriber: findValue('Insured ID') || findValue('Member ID') || findValue('Policy Number'),
       group: findValue('Group') || findValue('Group Number'),
@@ -85,7 +83,6 @@ const App = () => {
     printLine("Date of Birth", parsedData.dob);
     printLine("Age", parsedData.age);
     printLine("Sex", parsedData.sex);
-    printLine("Referral", parsedData.referral);
     
     // Emergency Section
     if (parsedData.emergencyContact || parsedData.emergencyPhone) {
@@ -198,7 +195,6 @@ const App = () => {
                     <PreviewRow label="DOB" value={parsedData.dob} />
                     <PreviewRow label="Age" value={parsedData.age} />
                     <PreviewRow label="Sex" value={parsedData.sex} />
-                    <PreviewRow label="Referral" value={parsedData.referral} />
                     
                     {(parsedData.emergencyContact || parsedData.emergencyPhone) && (
                         <>
